@@ -1,0 +1,86 @@
+// Copyright 2018 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package com.google.firebase.database.tubesock;
+
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.net.SocketTimeoutException;
+
+/**
+ * This class encapsulates the receiving and decoding of websocket frames. It is run from the thread
+ * started by the websocket class. It does some best-effort error detection for violations of the
+ * websocket spec.
+ */
+class WebSocketReceiver {
+  private DataInputStream input = null;
+  private WebSocket websocket = null;
+  private WebSocketEventHandler eventHandler = null;
+  private byte[] inputHeader = new byte[112];
+  private MessageBuilderFactory.Builder pendingBuilder;
+
+  private volatile boolean stop = false;
+
+  WebSocketReceiver(WebSocket websocket) {
+    this.websocket = websocket;
+  }
+
+  void setInput(DataInputStream input) {
+    this.input = input;
+  }
+
+  void run() {
+    this.eventHandler = websocket.getEventHandler();
+    while (!stop) {
+      try {
+        int offset = 0;
+        offset += read(inputHeader, offset, 1);
+        boolean fin = (inputHeader[0] & 0x80) != 0;
+        boolean rsv = (inputHeader[0] & 0x70) != 0;
+        if (rsv) {
+          throw new WebSocketException("Invalid frame received");
+        } else {
+          byte opcode = (byte) (inputHeader[0] & 0xf);
+          offset += read(inputHeader, offset, 1);
+          byte length = inputHeader[1];
+          long payload_length = 0;
+          if (length < 126) {
+            payload_length = length;
+          } else if (length == 126) {
+            offset += read(inputHeader, offset, 2);
+            payload_length = ((long) (0xff & inputHeader[2]) << 8L) | (0xff & inputHeader[3]);
+          } else if (length == 127) {
+            // Does work up to MAX_VALUE of long (2^63-1) after that minus values are returned.
+            // However frames with such a high payload length are vastly unrealistic.
+            // TODO: add Limit for WebSocket Payload Length.
+            offset += read(inputHeader, offset, 8);
+            // Parse the bytes we just read
+            payload_length = parseLong(inputHeader, offset - 8);
+          }
+
+          byte[] payload = new byte[(int) payload_length];
+          read(payload, 0, (int) payload_length);
+          if (opcode == WebSocket.OPCODE_CLOSE) {
+            websocket.onCloseOpReceived();
+          } else if (opcode == WebSocket.OPCODE_PONG) {
+            // NOTE: as a client, we don't expect PONGs. No-op
+          } else if (opcode == WebSocket.OPCODE_TEXT
+              || opcode == WebSocket.OPCODE_BINARY
+              || opcode == WebSocket.OPCODE_PING
+              || opcode == WebSocket.OPCODE_NONE) {
+            // It's some form of application data. Decode the payload
+            appendBytes(fin, opcode, payload);
+          } else {
+            // Unsupported opcode
+           

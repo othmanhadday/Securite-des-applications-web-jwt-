@@ -1,0 +1,13 @@
+<div class="container">
+  <table class="table table-striped">
+    <thead>
+    <td>Id</td><td>TaskName</td>
+    </thead>
+    <tbody>
+    <tr *ngFor="let task of tasks">
+      <td>{{task.id}}</td>
+      <td>{{task.taskName}}</td>
+    </tr>
+    </tbody>
+  </table>
+</div>

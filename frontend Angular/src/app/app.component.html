@@ -1,0 +1,12 @@
+<p></p>
+<div class="container">
+
+  <div *ngIf="authService.jwtToken">
+    <button routerLink="tasks" class="btn btn-primary">Tasks</button>
+    <button routerLink="new-task" *ngIf="authService.isAdmin()" class="btn btn-success">New Task</button>
+    <button (click)="logOut()" class="btn btn-danger float-right">LogOut</button>
+  </div>
+  <p></p>
+
+  <router-outlet></router-outlet>
+</div>
